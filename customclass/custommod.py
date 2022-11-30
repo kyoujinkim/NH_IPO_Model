@@ -64,6 +64,33 @@ class CategoricalAttention(layers.Layer):
         resultmat = tf.reduce_sum(attmat, axis=1)
         return resultmat
 
+class CategoricalAttention_v2(layers.Layer):
+    def __init__(self, dropout=0.2, **kwargs):
+        super(CategoricalAttention_v2, self).__init__(**kwargs)
+        self.dropout = dropout
+        self.DOA = layers.Dropout(dropout)
+        self.batchA = layers.BatchNormalization()
+
+    def get_config(self):
+        config = super().get_config().copy()
+        config.update({
+            'dropout': self.dropout
+        })
+        return config
+
+    def build(self, input_shape):
+        self.w = self.add_weight(
+            shape=(input_shape[0][1], input_shape[1][1]),
+            initializer="random_normal",
+            trainable=True,
+        )
+
+    def call(self, inputs):
+        v = inputs[0]
+        q = tf.reduce_sum(self.w, axis=1, keepdims=True)
+        attention = tf.math.multiply(q, v)
+        return attention
+
 def recall_m(y_true, y_pred):
     true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
     possible_positives = K.sum(K.round(K.clip(y_true, 0, 1)))
