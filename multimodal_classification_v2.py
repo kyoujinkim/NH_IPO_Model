@@ -46,9 +46,9 @@ def make_sourcearr(splitdate, endsplit='9999-12-31', file_path='./backdata/'):
     bd_bb = pd.read_csv(file_path+'BB.csv', encoding='CP949', index_col='종목코드')
     bd_bb.기업집단 = bd_bb.기업집단.apply(lambda x: 0 if x is np.nan else 1)
 
-    match_comp = list(set(bd_cnn.index) & set(bd_bb.index))
+    match_comp = list(set(bd_bb.index) & set(bd_cnn.index))
     bd_cnn = bd_cnn.loc[match_comp]
-    bd_bb = bd_bb.loc[match_comp]
+    bd_bb = bd_bb.loc[match_comp].sort_values(by=['상장일', '종목명'], ascending=False)
 
     onehotE = OneHotEncoder()
     #make backdata
@@ -77,8 +77,8 @@ def make_sourcearr(splitdate, endsplit='9999-12-31', file_path='./backdata/'):
 
         #define datas
         temp_bb = eachrow[bb_name].values
-        temp_plstm = bd_bb['시가상승률'][bd_bb['상장일']<eachrow['수요예측일']].iloc[:10].values
-        temp_plstm = np.pad(temp_plstm, pad_width=(10-len(temp_plstm),0))
+        temp_plstm = bd_bb['시가상승률'][bd_bb['상장일']<eachrow['수요예측일']].iloc[:20].values
+        temp_plstm = np.pad(temp_plstm, pad_width=(20-len(temp_plstm),0))
         temp_cnn = np.vstack([bd_cnn.loc[compcode].filter(regex='FY0').values,
                               bd_cnn.loc[compcode].filter(regex='FY-1').values,
                               bd_cnn.loc[compcode].filter(regex='FY-2').values]).T
@@ -153,8 +153,8 @@ def build_multimodal(sourcearr):
     output_cnn = keras.layers.Reshape((1, lstm_filter))(x)
 
     input_Plstm = tf.keras.Input(shape=sourcearr[2].shape[1:], name='Plstm_input')
-    x = keras.layers.BatchNormalization()(input_Plstm)
-    x = keras.layers.Dense(lstm_filter)(x)
+    #x = keras.layers.BatchNormalization()(input_Plstm)
+    x = keras.layers.Dense(lstm_filter)(input_Plstm)
     output_Plstm = keras.layers.Reshape((1, lstm_filter))(x)
 
     input_EClstm = tf.keras.Input(shape=sourcearr[3].shape[1:], name='EClstm_input')
@@ -236,7 +236,7 @@ model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=lr_schedule),
 
 #save model architecture to image
 #plot_model(model, to_file='class_model_plot.png', show_shapes=True, show_layer_names=True)
-callback = CustomStopper(monitor='val_accuracy', patience=300, start_epoch=0, restore_best_weights=True)
+callback = CustomStopper(monitor='val_accuracy', patience=300, start_epoch=200, restore_best_weights=True)
 
 model.fit(x=train_x, y=train_y, shuffle=True
           ,epochs=1000000, verbose=1, callbacks=[callback]
