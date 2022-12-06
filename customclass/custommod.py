@@ -111,7 +111,7 @@ def f1_m(y_true, y_pred):
 class CustomStopper(tf.keras.callbacks.EarlyStopping):
     def __init__(self, monitor='val_accuracy',
                  patience=500, verbose=1, mode='auto',
-                 restore_best_weights=True, start_epoch=500):
+                 restore_best_weights=True, start_epoch=500, min_acc=0.9):
         super(CustomStopper, self).__init__(monitor=monitor,
                                             patience=patience,
                                             restore_best_weights=restore_best_weights,
@@ -119,7 +119,8 @@ class CustomStopper(tf.keras.callbacks.EarlyStopping):
                                             mode=mode
                                             )
         self.start_epoch = start_epoch
+        self.min_acc = min_acc
 
     def on_epoch_end(self, epoch, logs=None):
-        if epoch > self.start_epoch:
+        if epoch > self.start_epoch and logs['accuracy']>=self.min_acc:
             super().on_epoch_end(epoch, logs)
