@@ -30,9 +30,6 @@ def make_sourcearr(splitdate, endsplit='9999-12-31', file_path='./backdata/'):
     #encoder should be CP949 to display Korean
     bd_cnn = pd.read_csv(file_path+'cnnadj.csv', encoding='CP949', index_col='Code').T
     bd_cnn = bd_cnn.drop(labels=['Name','MKT Cap'], axis=1).astype('float')
-    #clip outliers
-    upperbound = pd.read_csv(file_path+'upperbound.csv', encoding='CP949', index_col=0)
-    bd_cnn = bd_cnn.clip(lower=0, upper=upperbound.values.flatten(), axis=1)
 
     bd_EClstm = pd.read_csv(file_path+'econ.csv',
                            index_col=0, parse_dates=True,
@@ -42,6 +39,10 @@ def make_sourcearr(splitdate, endsplit='9999-12-31', file_path='./backdata/'):
                            index_col=0, parse_dates=True,
                            encoding='CP949')
     bd_Slstm = bd_Slstm.rolling(13).mean().dropna()
+
+    bd_Rlstm = pd.read_csv(file_path+'mktrtn.csv',
+                           index_col=0, parse_dates=True,
+                           encoding='CP949').pct_change().fillna(value=0)
 
     bd_bb = pd.read_csv(file_path+'BB.csv', encoding='CP949', index_col='종목코드')
     bd_bb.기업집단 = bd_bb.기업집단.apply(lambda x: 0 if x is np.nan else 1)
@@ -59,6 +60,7 @@ def make_sourcearr(splitdate, endsplit='9999-12-31', file_path='./backdata/'):
     Plstmarr = []
     EClstmarr = []
     Slstmarr = []
+    Rlstmarr = []
     categarr = []
     montharr = []
     grouparr = []
@@ -82,8 +84,9 @@ def make_sourcearr(splitdate, endsplit='9999-12-31', file_path='./backdata/'):
         temp_cnn = np.vstack([bd_cnn.loc[compcode].filter(regex='FY0').values,
                               bd_cnn.loc[compcode].filter(regex='FY-1').values,
                               bd_cnn.loc[compcode].filter(regex='FY-2').values]).T
-        temp_EClstm = bd_EClstm.iloc[max(bd_EClstm.index.get_loc(bbdate, method='ffill') - 60,0):bd_EClstm.index.get_loc(bbdate,method='ffill')].values
-        temp_Slstm = bd_Slstm.iloc[bd_Slstm.index.get_loc(bbdate, method='ffill') - 13:bd_Slstm.index.get_loc(bbdate,method='ffill')].values
+        temp_EClstm = bd_EClstm.iloc[max(bd_EClstm.index.get_loc(bbdate, method='ffill') - 60,0):bd_EClstm.index.get_loc(bbdate,method='ffill')].T.values
+        temp_Slstm = bd_Slstm.iloc[bd_Slstm.index.get_loc(bbdate, method='ffill') - 13:bd_Slstm.index.get_loc(bbdate,method='ffill')].T.values
+        temp_Rlstm = bd_Rlstm.iloc[bd_Rlstm.index.get_loc(bbdate, method='ffill') - 13:bd_Rlstm.index.get_loc(bbdate,method='ffill')].T.values
 
         mktarr.append(eachrow['시장구분'])
         labelarr.append(compcode)
@@ -92,6 +95,7 @@ def make_sourcearr(splitdate, endsplit='9999-12-31', file_path='./backdata/'):
         Plstmarr.append(temp_plstm)
         EClstmarr.append(temp_EClstm)
         Slstmarr.append(temp_Slstm)
+        Rlstmarr.append(temp_Rlstm)
         categarr.append(eachrow['W_Sector'])
         montharr.append(pd.to_datetime(eachrow['수요예측일']).month)
         grouparr.append(groupnm)
@@ -105,6 +109,7 @@ def make_sourcearr(splitdate, endsplit='9999-12-31', file_path='./backdata/'):
     Plstmarr = np.array(Plstmarr).astype('float')
     EClstmarr = np.array(EClstmarr).astype('float')
     Slstmarr = np.array(Slstmarr).astype('float')
+    Rlstmarr = np.array(Rlstmarr).astype('float')
     sipoarr = np.array(sipoarr).astype('float')
 
     mktarr = load_enc_transform('mktenc', mktarr)
@@ -119,18 +124,20 @@ def make_sourcearr(splitdate, endsplit='9999-12-31', file_path='./backdata/'):
     trainidx = datearr_df[datearr_df.index < splitdate].values.flatten()
     testidx = datearr_df[(datearr_df.index >= splitdate) & (datearr_df.index < endsplit)].values.flatten()
 
+    EClstmarr = np.reshape(EClstmarr, np.append(EClstmarr.shape, 1))
+    Rlstmarr = np.reshape(Rlstmarr, np.append(Rlstmarr.shape, 1))
     Slstmarr = np.reshape(Slstmarr, np.append(Slstmarr.shape,1))
     cnnarr = np.reshape(cnnarr, np.append(cnnarr.shape,1))
 
     return [
                bbarr[trainidx], cnnarr[trainidx], Plstmarr[trainidx],
-               EClstmarr[trainidx], Slstmarr[trainidx],
+               EClstmarr[trainidx], Slstmarr[trainidx], Rlstmarr[trainidx],
                categarr[trainidx], montharr[trainidx], grouparr[trainidx], mktarr[trainidx], sipoarr[trainidx]
             ], \
            resultarr[trainidx], labelarr[trainidx], \
            [
                bbarr[testidx], cnnarr[testidx], Plstmarr[testidx],
-               EClstmarr[testidx], Slstmarr[testidx],
+               EClstmarr[testidx], Slstmarr[testidx], Rlstmarr[testidx],
                categarr[testidx], montharr[testidx], grouparr[testidx], mktarr[testidx], sipoarr[testidx]
             ], \
            resultarr[testidx], labelarr[testidx]
@@ -140,14 +147,16 @@ def build_multimodal(sourcearr):
     lstm_filter = 32
 
     input_bb = tf.keras.Input(shape=sourcearr[0].shape[1:], name='bb_input')
-    x = keras.layers.BatchNormalization(axis=1)(input_bb)
+    x = keras.layers.BatchNormalization()(input_bb)
     x = keras.layers.Dense(lstm_filter)(x)
     output_bb = keras.layers.Reshape((1, lstm_filter))(x)
 
     input_cnn = tf.keras.Input(shape=sourcearr[1].shape[1:], name='cnn_input')
-    x = keras.layers.BatchNormalization(axis=1)(input_cnn)
-    x = keras.layers.Conv2D(32, (3, 2), activation='relu')(x)
-    x = keras.layers.Conv2D(32, (3, 2), activation='relu')(x)
+    x = keras.layers.BatchNormalization()(input_cnn)
+    x = keras.layers.Conv2D(32, (3, 1), activation='relu')(x)
+    x = keras.layers.MaxPool2D((2, 1))(x) #0
+    x = keras.layers.Conv2D(32, (3, 1), activation='relu')(x)
+    x = keras.layers.MaxPool2D((1, 2))(x) #1
     x = keras.layers.Flatten()(x)
     x = keras.layers.Dense(lstm_filter)(x)
     output_cnn = keras.layers.Reshape((1, lstm_filter))(x)
@@ -159,17 +168,37 @@ def build_multimodal(sourcearr):
 
     input_EClstm = tf.keras.Input(shape=sourcearr[3].shape[1:], name='EClstm_input')
     x = keras.layers.BatchNormalization()(input_EClstm)
-    x = keras.layers.GRU(lstm_filter, activation='relu', return_sequences=True)(x)
-    x = keras.layers.GRU(lstm_filter, activation='relu', return_sequences=False)(x)
+    #x = keras.layers.GRU(lstm_filter, activation='relu', return_sequences=True)(x)
+    #x = keras.layers.GRU(lstm_filter, activation='relu', return_sequences=False)(x)
+    x = keras.layers.Conv2D(32, (4, 4), activation='relu')(x)
+    x = keras.layers.MaxPool2D((2, 3))(x) #2
+    x = keras.layers.Conv2D(32, (3, 3), activation='relu')(x)
+    x = keras.layers.MaxPool2D((2, 3))(x) #3
+    x = keras.layers.Conv2D(32, (2, 2), activation='relu')(x)
+    x = keras.layers.MaxPool2D((1, 3))(x) #4
+    x = keras.layers.Flatten()(x)
+    x = keras.layers.Dense(lstm_filter)(x)
     output_EClstm = keras.layers.Reshape((1, lstm_filter))(x)
 
     input_Slstm = tf.keras.Input(shape=sourcearr[4].shape[1:], name='Slstm_input')
-    x = keras.layers.BatchNormalization(axis=1)(input_Slstm)
-    x = keras.layers.Conv2D(32, (3, 2), activation='relu')(x)
-    x = keras.layers.Conv2D(32, (3, 2), activation='relu')(x)
+    x = keras.layers.BatchNormalization()(input_Slstm)
+    x = keras.layers.Conv2D(32, (3, 3), activation='relu')(x)
+    x = keras.layers.MaxPool2D((2, 2))(x) #5
+    x = keras.layers.Conv2D(32, (3, 3), activation='relu')(x)
+    x = keras.layers.MaxPool2D((1, 2))(x) #6
     x = keras.layers.Flatten()(x)
     x = keras.layers.Dense(lstm_filter)(x)
     output_Slstm = keras.layers.Reshape((1, lstm_filter))(x)
+
+    input_Rlstm = tf.keras.Input(shape=sourcearr[5].shape[1:], name='Rlstm_input')
+    x = keras.layers.BatchNormalization()(input_Rlstm)
+    x = keras.layers.Conv2D(32, (1, 3), activation='relu')(x)
+    x = keras.layers.MaxPool2D((1, 2))(x) #7
+    x = keras.layers.Conv2D(32, (1, 3), activation='relu')(x)
+    x = keras.layers.MaxPool2D((1, 2))(x) #8
+    x = keras.layers.Flatten()(x)
+    x = keras.layers.Dense(lstm_filter)(x)
+    output_Rlstm = keras.layers.Reshape((1, lstm_filter))(x)
 
     input_categ = tf.keras.Input(shape=sourcearr[-5].shape[1:], name='categ_input')
     input_month = tf.keras.Input(shape=sourcearr[-4].shape[1:], name='month_input')
@@ -182,6 +211,7 @@ def build_multimodal(sourcearr):
                                                                        , output_Plstm
                                                                        , output_EClstm
                                                                        , output_Slstm
+                                                                       , output_Rlstm
                                                                       ])
 
     input_sub = input_total
@@ -207,7 +237,7 @@ def build_multimodal(sourcearr):
 
     output_total = keras.layers.Dense(2, activation='softmax', use_bias=False)(x)
 
-    model_total = keras.models.Model(inputs=[input_bb, input_cnn, input_Plstm, input_EClstm, input_Slstm
+    model_total = keras.models.Model(inputs=[input_bb, input_cnn, input_Plstm, input_EClstm, input_Slstm, input_Rlstm
                                             , input_categ, input_month, input_group, input_mkt, input_sipo
                                              ],
                                outputs=output_total,
@@ -218,7 +248,7 @@ def build_multimodal(sourcearr):
 
     return model_total
 
-train_x, train_y, _, test_x, test_y, test_label= make_sourcearr(splitdate='2022-03-31', endsplit='2022-12-31')
+train_x, train_y, _, test_x, test_y, test_label= make_sourcearr(splitdate='2022-03-31')
 
 model = build_multimodal(train_x)
 #model = keras.models.load_model('./model_weight/bestweight/multimodal_class_best220214_1536.h5', custom_objects={'CategoricalAttention':CategoricalAttention,'resDense':resDense, 'f1_m':f1_m})
@@ -236,11 +266,11 @@ model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=lr_schedule),
 
 #save model architecture to image
 #plot_model(model, to_file='class_model_plot.png', show_shapes=True, show_layer_names=True)
-callback = CustomStopper(monitor='val_accuracy', patience=300, start_epoch=200, restore_best_weights=True)
+callback = CustomStopper(monitor='val_accuracy', patience=500, start_epoch=100, min_acc=0.7, restore_best_weights=True)
 
 model.fit(x=train_x, y=train_y, shuffle=True
           ,epochs=1000000, verbose=1, callbacks=[callback]
-          ,validation_split= 0.3
+          ,validation_split= 0.2
           )
 
 model.save('./model_weight/multimodal_class.h5')
