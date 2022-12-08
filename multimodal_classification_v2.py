@@ -152,17 +152,17 @@ def build_multimodal(sourcearr):
     output_bb = keras.layers.Reshape((1, lstm_filter))(x)
 
     input_cnn = tf.keras.Input(shape=sourcearr[1].shape[1:], name='cnn_input')
-    x = keras.layers.BatchNormalization()(input_cnn)
-    x = keras.layers.Conv2D(32, (3, 1), activation='relu')(x)
-    x = keras.layers.MaxPool2D((2, 1))(x) #0
-    x = keras.layers.Conv2D(32, (3, 1), activation='relu')(x)
-    x = keras.layers.MaxPool2D((1, 2))(x) #1
+    x = keras.layers.Masking(mask_value=0)(input_cnn)
+    x = keras.layers.BatchNormalization()(x)
+    x = keras.layers.Conv2D(32, (1, 2), activation='relu')(x)
+    x = keras.layers.Conv2D(32, (1, 2), activation='relu')(x)
     x = keras.layers.Flatten()(x)
     x = keras.layers.Dense(lstm_filter)(x)
     output_cnn = keras.layers.Reshape((1, lstm_filter))(x)
 
     input_Plstm = tf.keras.Input(shape=sourcearr[2].shape[1:], name='Plstm_input')
-    #x = keras.layers.BatchNormalization()(input_Plstm)
+    #x = keras.layers.BatchNormalization()
+    x = keras.layers.Masking(mask_value=0)(input_Plstm)
     x = keras.layers.Dense(lstm_filter)(input_Plstm)
     output_Plstm = keras.layers.Reshape((1, lstm_filter))(x)
 
@@ -170,22 +170,22 @@ def build_multimodal(sourcearr):
     x = keras.layers.BatchNormalization()(input_EClstm)
     #x = keras.layers.GRU(lstm_filter, activation='relu', return_sequences=True)(x)
     #x = keras.layers.GRU(lstm_filter, activation='relu', return_sequences=False)(x)
-    x = keras.layers.Conv2D(32, (4, 4), activation='relu')(x)
-    x = keras.layers.MaxPool2D((2, 3))(x) #2
-    x = keras.layers.Conv2D(32, (3, 3), activation='relu')(x)
-    x = keras.layers.MaxPool2D((2, 3))(x) #3
-    x = keras.layers.Conv2D(32, (2, 2), activation='relu')(x)
-    x = keras.layers.MaxPool2D((1, 3))(x) #4
+    x = keras.layers.Conv2D(32, (1, 3), activation='relu')(x)
+    x = keras.layers.MaxPool2D((1, 3))(x) #1
+    x = keras.layers.Conv2D(32, (1, 3), activation='relu')(x)
+    x = keras.layers.MaxPool2D((1, 3))(x) #2
+    x = keras.layers.Conv2D(32, (1, 2), activation='relu')(x)
+    x = keras.layers.MaxPool2D((1, 3))(x) #3
     x = keras.layers.Flatten()(x)
     x = keras.layers.Dense(lstm_filter)(x)
     output_EClstm = keras.layers.Reshape((1, lstm_filter))(x)
 
     input_Slstm = tf.keras.Input(shape=sourcearr[4].shape[1:], name='Slstm_input')
     x = keras.layers.BatchNormalization()(input_Slstm)
-    x = keras.layers.Conv2D(32, (3, 3), activation='relu')(x)
-    x = keras.layers.MaxPool2D((2, 2))(x) #5
-    x = keras.layers.Conv2D(32, (3, 3), activation='relu')(x)
-    x = keras.layers.MaxPool2D((1, 2))(x) #6
+    x = keras.layers.Conv2D(32, (1, 3), activation='relu')(x)
+    x = keras.layers.MaxPool2D((1, 2))(x) #4
+    x = keras.layers.Conv2D(32, (1, 3), activation='relu')(x)
+    x = keras.layers.MaxPool2D((1, 2))(x) #5
     x = keras.layers.Flatten()(x)
     x = keras.layers.Dense(lstm_filter)(x)
     output_Slstm = keras.layers.Reshape((1, lstm_filter))(x)
@@ -215,27 +215,45 @@ def build_multimodal(sourcearr):
                                                                       ])
 
     input_sub = input_total
-    input_res = CategoricalAttention_v2(name='mktAttention')([input_sub, input_mkt])
+    bias_total = 0
+    input_res, bias_res = CategoricalAttention_v2(name='mktAttention')([input_sub, input_mkt])
     input_total = input_res
-    input_res = CategoricalAttention_v2(name='sipoAttention')([input_sub, input_sipo])
+    bias_total += bias_res
+    input_res, bias_res = CategoricalAttention_v2(name='sipoAttention')([input_sub, input_sipo])
     input_total += input_res
-    input_res = CategoricalAttention_v2(name='groupAttention')([input_sub, input_group])
+    bias_total += bias_res
+    input_res, bias_res = CategoricalAttention_v2(name='groupAttention')([input_sub, input_group])
     input_total += input_res
-    input_res = CategoricalAttention_v2(name='sectorAttention')([input_sub, input_categ])
+    bias_total += bias_res
+    input_res, bias_res = CategoricalAttention_v2(name='sectorAttention')([input_sub, input_categ])
     input_total += input_res
-    input_res = CategoricalAttention_v2(name='monthAttention')([input_sub, input_month])
+    bias_total += bias_res
+    input_res, bias_res = CategoricalAttention_v2(name='monthAttention')([input_sub, input_month])
     input_total += input_res
+    bias_total += bias_res
+
     input_total = keras.layers.Flatten()(input_total)
+    bias_total = keras.layers.Flatten()(bias_total)
+    #input_total = tf.add(input_total, bias_total)
+    #input_total = keras.layers.Concatenate()([input_total, bias_total])
 
     x = keras.layers.Dense(128, activation='relu')(input_total)
     x = keras.layers.BatchNormalization()(x)
-    x = keras.layers.Dense(32, activation='relu')(x)
+    x = keras.layers.Dense(128, activation='relu')(x)
     x = keras.layers.BatchNormalization()(x)
 
     for _ in range(11):
-        x = resDense(32, 0.5)(x)
+        x = resDense(128, 0.5)(x)
 
-    output_total = keras.layers.Dense(2, activation='softmax', use_bias=False)(x)
+    #bias_total = keras.layers.Concatenate()([-bias_total, bias_total])
+    #bias_total = keras.layers.Flatten()(bias_total)
+    #x = keras.layers.Concatenate()([x, bias_total])
+
+    #x = keras.layers.Dense(16, activation='relu')(x)
+    x = tf.add(x, bias_total)
+    x = keras.layers.BatchNormalization()(x)
+    #x = keras.layers.Concatenate()([x, bias_total])
+    output_total = keras.layers.Dense(2, activation='softmax', use_bias=True)(x)
 
     model_total = keras.models.Model(inputs=[input_bb, input_cnn, input_Plstm, input_EClstm, input_Slstm, input_Rlstm
                                             , input_categ, input_month, input_group, input_mkt, input_sipo
@@ -266,16 +284,25 @@ model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=lr_schedule),
 
 #save model architecture to image
 #plot_model(model, to_file='class_model_plot.png', show_shapes=True, show_layer_names=True)
-callback = CustomStopper(monitor='val_accuracy', patience=500, start_epoch=100, min_acc=0.7, restore_best_weights=True)
+callback = CustomStopper(monitor='val_accuracy'
+                         , patience=500
+                         , start_epoch=100
+                         , min_acc=0.8
+                         , restore_best_weights=True)
 
-model.fit(x=train_x, y=train_y, shuffle=True
-          ,epochs=1000000, verbose=1, callbacks=[callback]
-          ,validation_split= 0.2
+model.fit(x=train_x, y=train_y,
+          shuffle=True
+          ,epochs=100000
+          , verbose=1
+          , callbacks=[callback]
+          ,validation_split= 0.3
           )
 
 model.save('./model_weight/multimodal_class.h5')
 
-model = keras.models.load_model('./model_weight/multimodal_class.h5', custom_objects={'CategoricalAttention_v2':CategoricalAttention_v2, 'resDense':resDense, 'f1_m':f1_m})
+model = keras.models.load_model('./model_weight/multimodal_class.h5',
+                                custom_objects={'CategoricalAttention_v2':CategoricalAttention_v2, 'resDense':resDense, 'f1_m':f1_m}
+                                )
 
 prediction = model.predict(test_x).round()
 
