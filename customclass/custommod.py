@@ -81,15 +81,26 @@ class CategoricalAttention_v2(layers.Layer):
     def build(self, input_shape):
         self.w = self.add_weight(
             shape=(input_shape[0][1], input_shape[1][1]),
-            initializer="random_normal",
+            initializer="RandomNormal", #RandomNormal
             trainable=True,
+            name='w'
+        )
+        self.b = self.add_weight(
+            shape=(1, input_shape[1][1]),
+            initializer="RandomNormal",
+            trainable=True,
+            name='b'
         )
 
     def call(self, inputs):
         v = inputs[0]
-        q = tf.reduce_sum(self.w, axis=1, keepdims=True)
-        attention = tf.math.multiply(q, v)
-        return attention
+        input_1 = layers.Reshape((inputs[1].shape[1],1))(inputs[1])
+        masked_w = tf.matmul(self.w, input_1)
+        masked_b = tf.matmul(self.b, input_1)
+        #masked_b = layers.Reshape((masked_b.shape[1]))(masked_b)
+        #q_b = tf.reduce_sum(masked_b, axis=1, keepdims=True)
+        attention = tf.math.multiply(v, masked_w)
+        return attention, masked_b
 
 def recall_m(y_true, y_pred):
     true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
