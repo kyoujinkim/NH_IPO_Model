@@ -21,7 +21,7 @@
 #
 ## Patch Note 2022-12-08
 
-1. Attention Network 개선
+#### 1. Attention Network 개선
 - 기존 모델의 Categorical Feature Weighting Network는 학습된 Feature값들 전부에 대해 Attention 비중값을 계산
 - 이로인해 학습해야하는 비중값의 개수가 지나치게 많아 학습 및 수렴에 어려움을 겪음
 - 또한, 변수별 구분없이 모든 Feature값들을 취합하여 학습하므로 범주변수에 따른 변수별 민감도에 대한 측정의 신뢰도가 떨어짐
@@ -33,10 +33,10 @@
 - 민감도 외에도 범주변수 자체가 상승확률에 편향을 발생시킬 수 있음
 - 따라서 범주변수별 편향도(Categorical Bias)를 직전 Network에서 더하여 범주변수에 따른 상승확률 편향도 반영 및 계산
 
-2. 재무제표 누락값 처리
+#### 2. 재무제표 누락값 처리
 - FY-1, FY-2의 경우, 값이 누락 경우가 잦음. 누락값은 0으로 처리하여 Masking 처리
 - 재주제표 Outlier값을 제외시키는 것은 되려 모델 예측력을 감소시킴. Outlier 처리는 추가하지 않음
 
-3. LSTM Network 제외 및 CNN Network 개선
+#### 3. LSTM Network 제외 및 CNN Network 개선
 - LSTM Network 자체가 모델 학습 시간을 증가시키는 경향이 있을뿐더러, 입력변수들의 시계열 길이가 길지 않으므로 CNN Network를 통한 학습으로도 충분히 Feature값 출력 가능
 - 동일 변수 내에서의 시계열 값만을 추상화시키기 위하여 1D Convolution Network를 적용하였으며 MaxPool 단계에서도 시계열 축에 대해서는 Pooling
