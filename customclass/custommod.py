@@ -1,6 +1,7 @@
-from tensorflow.keras import layers
-import tensorflow as tf
 from tensorflow.keras import backend as K
+from tensorflow.keras import layers
+from tensorflow.keras.layers import Lambda
+import tensorflow as tf
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 

@@ -1,3 +1,5 @@
+import pickle
+
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
@@ -5,7 +7,6 @@ from sklearn.preprocessing import OneHotEncoder
 from customclass.custommod import resDense, CategoricalAttention_v2, f1_m, CustomStopper
 from matplotlib import font_manager, rc, use
 from sklearn.metrics import confusion_matrix, f1_score
-from joblib import load
 import os
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -14,7 +15,8 @@ import pandas as pd
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 def load_enc_transform(encname, arr):
-    enc = load('./onehot_encoders/{}.joblib'.format(encname))
+    with open('./onehot_encoders/{}.pkl'.format(encname), 'rb') as f:
+        enc = pickle.load(f)
     onehotvector = enc.transform(np.array(arr).reshape(-1, 1)).toarray()
 
     return onehotvector
@@ -28,23 +30,24 @@ rc('font', family=font)
 def make_sourcearr(splitdate, endsplit='9999-12-31', file_path='./backdata/'):
     #import source data
     #encoder should be CP949 to display Korean
-    bd_cnn = pd.read_csv(file_path+'cnnadj.csv', encoding='CP949', index_col='Code').T
+    bd_cnn = pd.read_csv(file_path+'cnnadj.csv', encoding='utf-8-sig', index_col='Code').T
     bd_cnn = bd_cnn.drop(labels=['Name','MKT Cap'], axis=1).astype('float')
 
-    bd_EClstm = pd.read_csv(file_path+'econ.csv',
-                           index_col=0, parse_dates=True,
-                           encoding='CP949').fillna(value=0)
+    bd_EClstm = pd.read_excel(file_path+'0.raw_Econ_monthly.xlsx',
+                              sheet_name='final_data',
+                              index_col=0, parse_dates=True,
+                              ).fillna(value=0)
 
     bd_Slstm = pd.read_csv(file_path+'SWNEMO_Score.csv',
                            index_col=0, parse_dates=True,
-                           encoding='CP949')
+                           encoding='utf-8-sig')
     bd_Slstm = bd_Slstm.rolling(13).mean().dropna()
 
     bd_Rlstm = pd.read_csv(file_path+'mktrtn.csv',
                            index_col=0, parse_dates=True,
-                           encoding='CP949').pct_change().fillna(value=0)
+                           encoding='utf-8-sig').pct_change().fillna(value=0)
 
-    bd_bb = pd.read_csv(file_path+'BB.csv', encoding='CP949', index_col='종목코드')
+    bd_bb = pd.read_csv(file_path+'BB_v2.csv', encoding='utf-8-sig', index_col='종목코드')
     bd_bb.기업집단 = bd_bb.기업집단.apply(lambda x: 0 if x is np.nan else 1)
 
     match_comp = list(set(bd_bb.index) & set(bd_cnn.index))
@@ -84,9 +87,12 @@ def make_sourcearr(splitdate, endsplit='9999-12-31', file_path='./backdata/'):
         temp_cnn = np.vstack([bd_cnn.loc[compcode].filter(regex='FY0').values,
                               bd_cnn.loc[compcode].filter(regex='FY-1').values,
                               bd_cnn.loc[compcode].filter(regex='FY-2').values]).T
-        temp_EClstm = bd_EClstm.iloc[max(bd_EClstm.index.get_loc(bbdate, method='ffill') - 60,0):bd_EClstm.index.get_loc(bbdate,method='ffill')].T.values
-        temp_Slstm = bd_Slstm.iloc[bd_Slstm.index.get_loc(bbdate, method='ffill') - 13:bd_Slstm.index.get_loc(bbdate,method='ffill')].T.values
-        temp_Rlstm = bd_Rlstm.iloc[bd_Rlstm.index.get_loc(bbdate, method='ffill') - 13:bd_Rlstm.index.get_loc(bbdate,method='ffill')].T.values
+        tmpidx = max(bd_EClstm.index.get_indexer([bbdate], method='ffill')[0],0)
+        temp_EClstm = bd_EClstm.iloc[max(tmpidx - 60,0):tmpidx].T.values
+        tmpidx = max(bd_Slstm.index.get_indexer([bbdate], method='ffill')[0],0)
+        temp_Slstm = bd_Slstm.iloc[max(tmpidx - 13,0):tmpidx].T.values
+        tmpidx = max(bd_Rlstm.index.get_indexer([bbdate], method='ffill')[0],0)
+        temp_Rlstm = bd_Rlstm.iloc[max(tmpidx - 13,0):tmpidx].T.values
 
         mktarr.append(eachrow['시장구분'])
         labelarr.append(compcode)
@@ -152,8 +158,8 @@ def build_multimodal(sourcearr):
     output_bb = keras.layers.Reshape((1, lstm_filter))(x)
 
     input_cnn = tf.keras.Input(shape=sourcearr[1].shape[1:], name='cnn_input')
-    x = keras.layers.Masking(mask_value=0)(input_cnn)
-    x = keras.layers.BatchNormalization()(x)
+    #x = keras.layers.Masking(mask_value=0)(input_cnn)
+    x = keras.layers.BatchNormalization()(input_cnn)
     x = keras.layers.Conv2D(32, (1, 2), activation='relu')(x)
     x = keras.layers.Conv2D(32, (1, 2), activation='relu')(x)
     x = keras.layers.Flatten()(x)
@@ -162,7 +168,6 @@ def build_multimodal(sourcearr):
 
     input_Plstm = tf.keras.Input(shape=sourcearr[2].shape[1:], name='Plstm_input')
     #x = keras.layers.BatchNormalization()
-    x = keras.layers.Masking(mask_value=0)(input_Plstm)
     x = keras.layers.Dense(lstm_filter)(input_Plstm)
     output_Plstm = keras.layers.Reshape((1, lstm_filter))(x)
 
@@ -245,12 +250,7 @@ def build_multimodal(sourcearr):
     for _ in range(11):
         x = resDense(128, 0.5)(x)
 
-    #bias_total = keras.layers.Concatenate()([-bias_total, bias_total])
-    #bias_total = keras.layers.Flatten()(bias_total)
-    #x = keras.layers.Concatenate()([x, bias_total])
-
-    #x = keras.layers.Dense(16, activation='relu')(x)
-    x = tf.add(x, bias_total)
+    x = keras.layers.Add()([x, bias_total])
     x = keras.layers.BatchNormalization()(x)
     #x = keras.layers.Concatenate()([x, bias_total])
     output_total = keras.layers.Dense(2, activation='softmax', use_bias=True)(x)
@@ -266,46 +266,49 @@ def build_multimodal(sourcearr):
 
     return model_total
 
-train_x, train_y, _, test_x, test_y, test_label= make_sourcearr(splitdate='9999-12-31')
+if __name__ == '__main__':
 
-#model = build_multimodal(train_x)
-model = keras.models.load_model('./model_weight/multimodal_class_v2.2_3.h5', custom_objects={'CategoricalAttention_v2':CategoricalAttention_v2,'resDense':resDense, 'f1_m':f1_m})
-lr_schedule = tf.keras.optimizers.schedules.CosineDecayRestarts(
-    initial_learning_rate=0.0003,
-    first_decay_steps=150,
-    t_mul=1,
-    m_mul=1
-)
+    train_x, train_y, _, test_x, test_y, test_label= make_sourcearr(splitdate='2024-12-31')
 
-model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=lr_schedule),
-                    loss='categorical_crossentropy',
-                    metrics=['accuracy', f1_m]
+    model = build_multimodal(train_x)
+    model.load_weights('./model_weight/multimodal_class_v3_2.h5', by_name=True, skip_mismatch=True)
+    #model = keras.models.load_model('./model_weight/multimodal_class_v3_base.h5', custom_objects={'CategoricalAttention_v2':CategoricalAttention_v2,'resDense':resDense, 'f1_m':f1_m})
+    lr_schedule = tf.keras.optimizers.schedules.CosineDecayRestarts(
+        initial_learning_rate=0.00005,
+        first_decay_steps=150,
+        t_mul=1,
+        m_mul=1
+    )
+
+    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=lr_schedule),
+                        loss='categorical_crossentropy',
+                        metrics=['accuracy', f1_m]
+                  )
+
+    #save model architecture to image
+    #plot_model(model, to_file='class_model_plot.png', show_shapes=True, show_layer_names=True)
+    callback = CustomStopper(monitor='val_accuracy'
+                             , patience=500
+                             , start_epoch=100
+                             , min_acc=0.7
+                             , restore_best_weights=True)
+
+    model.fit(x=train_x, y=train_y,
+              shuffle=True
+              ,epochs=100000
+              , verbose=1
+              , callbacks=[callback]
+              ,validation_split= 0.3
               )
 
-#save model architecture to image
-#plot_model(model, to_file='class_model_plot.png', show_shapes=True, show_layer_names=True)
-callback = CustomStopper(monitor='val_accuracy'
-                         , patience=500
-                         , start_epoch=100
-                         , min_acc=0.7
-                         , restore_best_weights=True)
+    model.save('./model_weight/multimodal_class.h5')
 
-model.fit(x=train_x, y=train_y,
-          shuffle=True
-          ,epochs=100000
-          , verbose=1
-          , callbacks=[callback]
-          ,validation_split= 0.3
-          )
-
-model.save('./model_weight/multimodal_class.h5')
-
-'''model = keras.models.load_model('./model_weight/multimodal_class.h5',
-                                custom_objects={'CategoricalAttention_v2':CategoricalAttention_v2, 'resDense':resDense, 'f1_m':f1_m}
-                                )
-
-prediction = model.predict(test_x).round()
-
-pd.DataFrame([test_label, np.argmax(prediction,axis=1), np.argmax(test_y,axis=1)]).T.to_csv('prediction.csv')
-print('accuracy of model :: ', model.evaluate(test_x,test_y), ' f1_score :: ', f1_score(test_y, prediction, average='macro'))
-print(confusion_matrix(np.argmax(test_y,axis=1),np.argmax(prediction,axis=1)))'''
+    '''model = keras.models.load_model('./model_weight/multimodal_class.h5',
+                                    custom_objects={'CategoricalAttention_v2':CategoricalAttention_v2, 'resDense':resDense, 'f1_m':f1_m}
+                                    )
+    
+    prediction = model.predict(test_x).round()
+    
+    pd.DataFrame([test_label, np.argmax(prediction,axis=1), np.argmax(test_y,axis=1)]).T.to_csv('prediction.csv')
+    print('accuracy of model :: ', model.evaluate(test_x,test_y), ' f1_score :: ', f1_score(test_y, prediction, average='macro'))
+    print(confusion_matrix(np.argmax(test_y,axis=1),np.argmax(prediction,axis=1)))'''

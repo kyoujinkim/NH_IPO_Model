@@ -1,17 +1,22 @@
+import pickle
+
 from customclass.custommod import resDense, CategoricalAttention_v2, f1_m
+
+from tensorflow import keras
+from multimodal_classification_v2 import build_multimodal
+
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import OneHotEncoder
-from tensorflow import keras
 from sklearn.metrics import confusion_matrix, f1_score
 import os
-from joblib import load
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 def load_enc_transform(encname, arr):
-    enc = load('./onehot_encoders/{}.joblib'.format(encname))
+    with open('./onehot_encoders/{}.pkl'.format(encname), 'rb') as f:
+        enc = pickle.load(f)
     onehotvector = enc.transform(np.array(arr).reshape(-1, 1)).toarray()
 
     return onehotvector
@@ -40,7 +45,7 @@ def make_sourcearr(file_path='./backdata/'):
                            index_col=0, parse_dates=True,
                            encoding='utf-8-sig').pct_change().fillna(value=0)
 
-    bd_bb = pd.read_csv(file_path+'BB.csv', encoding='utf-8-sig', index_col='종목코드')
+    bd_bb = pd.read_csv(file_path+'BB_v2.csv', encoding='utf-8-sig', index_col='종목코드')
     bd_bb.기업집단 = bd_bb.기업집단.apply(lambda x: 0 if x is np.nan else 1)
 
     match_comp = list(set(bd_bb.index) & set(bd_cnn.index))
@@ -80,9 +85,12 @@ def make_sourcearr(file_path='./backdata/'):
         temp_cnn = np.vstack([bd_cnn.loc[compcode].filter(regex='FY0').values,
                               bd_cnn.loc[compcode].filter(regex='FY-1').values,
                               bd_cnn.loc[compcode].filter(regex='FY-2').values]).T
-        temp_EClstm = bd_EClstm.iloc[max(bd_EClstm.index.get_loc(bbdate, method='ffill') - 60,0):bd_EClstm.index.get_loc(bbdate,method='ffill')].T.values
-        temp_Slstm = bd_Slstm.iloc[bd_Slstm.index.get_loc(bbdate, method='ffill') - 13:bd_Slstm.index.get_loc(bbdate,method='ffill')].T.values
-        temp_Rlstm = bd_Rlstm.iloc[bd_Rlstm.index.get_loc(bbdate, method='ffill') - 13:bd_Rlstm.index.get_loc(bbdate,method='ffill')].T.values
+        tmpidx = max(bd_EClstm.index.get_indexer([bbdate], method='ffill')[0],0)
+        temp_EClstm = bd_EClstm.iloc[max(tmpidx - 60,0):tmpidx].T.values
+        tmpidx = max(bd_Slstm.index.get_indexer([bbdate], method='ffill')[0],0)
+        temp_Slstm = bd_Slstm.iloc[max(tmpidx - 13,0):tmpidx].T.values
+        tmpidx = max(bd_Rlstm.index.get_indexer([bbdate], method='ffill')[0],0)
+        temp_Rlstm = bd_Rlstm.iloc[max(tmpidx - 13,0):tmpidx].T.values
 
         mktarr.append(eachrow['시장구분'])
         labelarr.append(compcode)
@@ -131,9 +139,11 @@ def make_sourcearr(file_path='./backdata/'):
 
 sourcearr, resultarr, label = make_sourcearr()
 
-model = keras.models.load_model('./model_weight/multimodal_class_v2_2_best.h5',
-                                custom_objects={'CategoricalAttention_v2':CategoricalAttention_v2, 'resDense':resDense, 'f1_m':f1_m}
-                                )
+model = build_multimodal(sourcearr)
+model.load_weights('./model_weight/multimodal_class_v3_2.h5')
+model.compile(loss='categorical_crossentropy',
+              metrics=['accuracy', f1_m]
+              )
 
 #prediction = model.predict(sourcearr).round()
 prediction = model.predict(sourcearr)
